@@ -34,27 +34,31 @@ std::string sha256(const std::string& input){
     
     const EVP_MD* md = EVP_sha256();
     unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int lengthOfHash = 0;
+    unsigned int length_of_hash = 0;
     
     // if failed to initialize
     if (EVP_DigestInit_ex(context, md, nullptr) != 1 ||
         EVP_DigestUpdate(context, input.c_str(), input.size()) != 1 ||
-        EVP_DigestFinal_ex(context, hash, &lengthOfHash) != 1
+        EVP_DigestFinal_ex(context, hash, &length_of_hash) != 1
     ){
         EVP_MD_CTX_free(context);
         return "";
     }
     
-    // Convert raw binary hash to hex string
+    EVP_MD_CTX_free(context);
+
+    return std::string(reinterpret_cast<char*>(hash), length_of_hash);  // raw 32 byte
+}
+
+std::string to_hex(const std::string& raw){
     std::stringstream ss;
-    for (unsigned int i = 0; i < lengthOfHash; ++i){
+    for (unsigned char c: raw){
         ss << 
         std::hex << // use base16
         std::setw(2) << // print 2 character for each byte
         std::setfill('0') << // ensure F become 0F to keep 64 character long 
-        (int)hash[i]; // cast raw byte to int
+        (int)c; // cast raw byte to int
     }
-
     return ss.str();
 }
 
@@ -63,11 +67,13 @@ int main(){
     BlockHeader bh1 {123, "0xFF96437", "0x123098", 1262304000, 1, 4};
     
     std::string input = "Hello World";
-    std::string hash = sha256(input);
+    std::string hash = to_hex(sha256(input));
+    std::string raw_hash = sha256(input);
+    std::string double_hash = to_hex(sha256(sha256(input)));
     
     std::cout << "input: " << input << "\n"; 
-    // std::cout << sizeof(std::string) << "\n";
-    // std::cout << t1.from<< "\n"; 
     std::cout << "hash: " << hash << "\n"; 
+    std::cout << "raw hash: " << raw_hash << "\n"; 
+    std::cout << "double hash: " << double_hash << "\n"; 
     return 0;
 }
