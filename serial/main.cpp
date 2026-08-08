@@ -8,7 +8,9 @@
 #include <vector>
 #include <openssl/evp.h>
 
+constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
+constexpr char PUBLIC_KEY[] = "0350929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d51bfbcef1a81c3b16";
 
 struct VarInt {
     uint64_t value;
@@ -98,6 +100,18 @@ std::string to_hex(const std::string& raw){
     return ss.str();
 }
 
+// for public key convert
+std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
+    std::vector<uint8_t> bytes;
+    bytes.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        bytes.push_back(
+            static_cast<uint8_t>(std::stoi(hex.substr(i, 2), nullptr, 16))
+        );
+    }
+    return bytes;
+}
+
 int main(){
     // Initialize the standard 32-bit Mersenne Twister engine with the seed
     std::mt19937 gen(SEED);
@@ -117,17 +131,45 @@ int main(){
         {0x0F},            // script_sig: 1 byte of data
         0xFFFFFFFF         // sequence
     };
+    
+    // create public key and format it to be able to store in txout
+    std::vector<uint8_t> pubkey = hex_to_bytes(
+            PUBLIC_KEY
+    );
+    std::vector<uint8_t> script_pubkey;
+    script_pubkey.push_back(0x21); // push 33-byte opcode
+    script_pubkey.insert(script_pubkey.end(), pubkey.begin(), pubkey.end());
+    script_pubkey.push_back(0xAC); // OP_CHECKSIG
+
+    TxOut txout {
+          5000000000,  // in satoshi 
+          VarInt{ static_cast<uint64_t>(script_pubkey.size()) }, 
+          script_pubkey
+    };
 
 
     // TxIns & TxOuts
+    std::vector<TxIn> txins;
+    txins.push_back(txin);
+    std::vector<TxOut> txouts;
+    txouts.push_back(txout);
 
     // Transaction 
+    Transaction transaction { VERSION, txins, txouts, 1262304000 };
 
+    // Transactions
+    std::vector<Transaction> transactions;
+    transactions.push_back(transaction); 
 
-    // 
-    
+    // Block Header 
     BlockHeader bh1 {123, "0xFF96437", "0x123098", 1262304000, 0x0, 0x4};
     // Genesis Block
+    Block genesis_block { 
+        sizeof(Block),
+        bh1,
+        VarInt{0},
+        transactions
+     };
     
     
     // std::string input = "Hello World";
@@ -135,12 +177,12 @@ int main(){
     // std::string raw_hash = sha256(input);
     // std::string double_hash = to_hex(sha256(sha256(input)));
     
-    // std::cout << "input: " << input << "\n"; 
+    std::cout << "input: " << genesis_block.block_size << "\n"; 
     // std::cout << "hash: " << hash << "\n"; 
     // std::cout << "raw hash: " << raw_hash << "\n"; 
     // std::cout << "double hash: " << double_hash << "\n"; 
     
-    std::cout << "input: " << txin.prev_index<< "\n"; 
+    // std::cout << "input: " << txin.prev_index<< "\n"; 
     // combine all the data and hash the actual block
 
 
