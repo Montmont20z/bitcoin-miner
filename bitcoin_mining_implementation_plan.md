@@ -48,22 +48,52 @@ CMake produces `miner_serial`, `miner_omp`, `miner_cuda`, `miner_mpi`. CUDA and 
 struct Transaction { uint32_t id; std::string from, to; double amount; };
 ```
 
-**BlockHeader** — mirror Bitcoin's real 80-byte layout so the report can claim fidelity:
+### **Full Block**
+| Field | Size | Data Type |
+|---|---|---|
+| Magic bytes (network only, not in serialized block) | 4 bytes | uint32 |
+| Block size | 4 bytes | uint32 (little-endian) |
+| **Block Header** | 80 bytes | (see below) |
+| Transaction counter | 1–9 bytes | VarInt |
+| Transactions | variable | array of Transaction structs |
 
-| Field         | Size | Notes                                   |
-|---------------|------|-----------------------------------------|
-| version       | 4 B  | constant, e.g. 1                        |
-| prev_hash     | 32 B | SHA-256d of previous block's header     |
-| merkle_root   | 32 B | Merkle root of this block's txs         |
-| timestamp     | 4 B  | Unix time when mining started           |
-| bits          | 4 B  | encoded difficulty (we store k directly)|
-| nonce         | 4 B  | the search variable                     |
+### **BlockHeader** 
 
-**Block** = header + transaction list + (after mining) the winning hash.
+| Field | Size | Data Type | Notes |
+|---|---|---|---|
+| Version | 4 bytes | int32 (signed) | Bit flags signaling soft-fork support (BIP9) |
+| Previous Block Hash | 32 bytes | char[32] / uint256 | SHA-256d of prior header, stored little-endian |
+| Merkle Root | 32 bytes | char[32] / uint256 | Root of the transaction merkle tree |
+| Timestamp | 4 bytes | uint32 | Unix epoch seconds |
+| Bits (nBits) | 4 bytes | uint32 | Compact-format encoding of the target threshold |
+| Nonce | 4 bytes | uint32 | The value miners increment (0 → 4,294,967,295) — this is your parallelizable search space |
 
 **Merkle root** — pairwise double-SHA-256 up the tree, duplicating the last node on odd levels (Bitcoin convention). Serial is fine for correctness; parallelising tree levels with OpenMP is an optional extra-effort item.
 
 **Difficulty check** — count leading zero **bits** (not hex digits) of the 32-byte digest. Expected work doubles per bit, giving a fine-grained workload knob: `expected_hashes ≈ 2^k`.
+
+### Transaction structure (each entry in the block body)
+
+| Field | Size | Data Type | Notes |
+|---|---|---|---|
+| Version | 4 bytes | int32 | |
+| Marker + Flag (SegWit only) | 2 bytes | uint8, uint8 | `0x00 0x01` if witness data present |
+| Input count | 1–9 bytes | VarInt | |
+| Inputs | variable | array of TxIn | each: 32-byte prev txid, 4-byte output index, VarInt+script sig, 4-byte sequence |
+| Output count | 1–9 bytes | VarInt | |
+| Outputs | variable | array of TxOut | each: 8-byte int64 value (satoshis), VarInt+scriptPubKey |
+| Witness data (SegWit only) | variable | array of witness stacks | one stack per input |
+| Locktime | 4 bytes | uint32 | |
+
+
+### VarInt encoding (used throughout)
+
+| Prefix byte | Meaning |
+|---|---|
+| `< 0xFD` | value is the byte itself |
+| `0xFD` | next 2 bytes = uint16 |
+| `0xFE` | next 4 bytes = uint32 |
+| `0xFF` | next 8 bytes = uint64 |
 
 ---
 
