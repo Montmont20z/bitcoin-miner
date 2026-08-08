@@ -41,13 +41,9 @@ CMake produces `miner_serial`, `miner_omp`, `miner_cuda`, `miner_mpi`. CUDA and 
 ---
 
 ## 3. Data model
-
-**Transaction** — generated once, serially, before mining begins (never call `rand()` inside a parallel region; it is not thread-safe). Use `<random>` (`std::mt19937` + distributions), seeded from a CLI flag so runs are reproducible.
-
-```cpp
-struct Transaction { uint32_t id; std::string from, to; double amount; };
-```
-
+Description of the data structure of a single block.
+Relationship: 
+```TxIn, TxOut -> TxIns, TxOuts -> Transaction -> BlockHeader, Transactions -> Full Block```
 ### **Full Block**
 | Field | Size | Data Type |
 |---|---|---|
