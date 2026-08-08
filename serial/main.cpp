@@ -1,10 +1,8 @@
 #include <cstdint>
 #include <iostream>
 #include <iomanip>
-#include <openssl/core_dispatch.h>
 #include <random>
 #include <sstream>
-#include <sys/types.h>
 #include <vector>
 #include <openssl/evp.h>
 
@@ -112,6 +110,16 @@ std::vector<uint8_t> hex_to_bytes(const std::string& hex) {
     return bytes;
 }
 
+// for block header
+void hex_to_array(const std::string& hex, uint8_t* out, size_t out_len) {
+    if (hex.size() != out_len * 2) {
+        std::cerr << "hex_to_array: expected " << out_len * 2 << " hex chars, got " << hex.size() << "\n";
+        return;
+    }
+    for (size_t i = 0; i < out_len; ++i)
+        out[i] = static_cast<uint8_t>(std::stoi(hex.substr(i * 2, 2), nullptr, 16));
+}
+
 int main(){
     // Initialize the standard 32-bit Mersenne Twister engine with the seed
     std::mt19937 gen(SEED);
@@ -162,12 +170,20 @@ int main(){
     transactions.push_back(transaction); 
 
     // Block Header 
-    BlockHeader bh1 {123, "0xFF96437", "0x123098", 1262304000, 0x0, 0x4};
+    std::string merkle_root_hex = "0000000000000000000000000000000000000000000000000000000000000000";
+    BlockHeader bh1{};
+    bh1.version = 123;
+    hex_to_array("0000000000000000000000000000000000000000000000000000000000000000", bh1.prev_hash, 32);
+    hex_to_array(merkle_root_hex, bh1.merkle_root, 32);   // real 64-hex-char merkle root
+    bh1.timestamp = 1262304000;
+    bh1.bits      = 0x1d00ffff;
+    bh1.nonce     = 0x4;
+
     // Genesis Block
     Block genesis_block { 
-        sizeof(Block),
+        0,  // real size TBD until serialize() exists
         bh1,
-        VarInt{0},
+        VarInt{ static_cast<uint64_t>(transactions.size()) },
         transactions
      };
     
