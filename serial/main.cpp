@@ -2,9 +2,11 @@
 #include <iostream>
 #include <iomanip>
 #include <random>
+#include <ratio>
 #include <sstream>
 #include <vector>
 #include <openssl/evp.h>
+#include <chrono>
 
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
@@ -64,6 +66,20 @@ struct Block {
     std::vector<Transaction> transactions; // list of transaction
 };
 
+int leading_zero_bits(const std::string& hash /* raw bytes */){
+    int count = 0;
+    for (unsigned char byte : hash){
+        if (byte == 0){ count += 8; continue; } // currently 1 byte is 0 ~= 0000 0000
+
+        for (int bit = 7; bit >= 0; --bit){
+           if ((byte >> bit) & 1) return count; 
+           count++;
+        }
+    }
+    // return the total amount of leading zero in int 
+    return count;
+}
+
 std::string sha256(const std::string& input){
     EVP_MD_CTX* context = EVP_MD_CTX_new();
     if (!context) return "";
@@ -86,7 +102,7 @@ std::string sha256(const std::string& input){
     return std::string(reinterpret_cast<char*>(hash), length_of_hash);  // raw 32 byte
 }
 
-std::string to_hex(const std::string& raw){
+std::string byte_to_hex(const std::string& raw){
     std::stringstream ss;
     for (unsigned char c: raw){
         ss << 
@@ -118,6 +134,22 @@ void hex_to_array(const std::string& hex, uint8_t* out, size_t out_len) {
     }
     for (size_t i = 0; i < out_len; ++i)
         out[i] = static_cast<uint8_t>(std::stoi(hex.substr(i * 2, 2), nullptr, 16));
+}
+
+std::string solve_for_nonce( BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
+    for (uint32_t n = 0;; ++n){
+        bh.nonce = n;
+        std::string header_byte(reinterpret_cast<const char*>(&bh), sizeof(bh)); // interpret bh as byte not struct
+        std::string hash = sha256(sha256(header_byte)); // double hash
+
+        if (leading_zero_bits(hash) >= target_zero_bits){
+            std::cout << "nonce: " << n << " hash: " << byte_to_hex(hash) << "\n"; // TODO: remove when optimize for performance
+            bh.nonce = n; // not strictly needed since bh is local, but explicit
+            return byte_to_hex(hash);
+        }
+        if (n == max_nonce) break; // guard against uint32_t wraparound → infinite loop
+    }
+    return ""; // exhausted nonce space without a solution
 }
 
 int main(){
@@ -170,7 +202,7 @@ int main(){
     transactions.push_back(transaction); 
 
     // Block Header 
-    std::string merkle_root_hex = "0000000000000000000000000000000000000000000000000000000000000000";
+    std::string merkle_root_hex = "0000000000000000000000000000000000000000000000000000000000000000"; // filler for now
     BlockHeader bh1{};
     bh1.version = 123;
     hex_to_array("0000000000000000000000000000000000000000000000000000000000000000", bh1.prev_hash, 32);
@@ -193,15 +225,24 @@ int main(){
     // std::string raw_hash = sha256(input);
     // std::string double_hash = to_hex(sha256(sha256(input)));
     
-    std::cout << "input: " << genesis_block.block_size << "\n"; 
+    // std::cout << "input: " << genesis_block.block_size << "\n"; 
     // std::cout << "hash: " << hash << "\n"; 
     // std::cout << "raw hash: " << raw_hash << "\n"; 
     // std::cout << "double hash: " << double_hash << "\n"; 
     
     // std::cout << "input: " << txin.prev_index<< "\n"; 
-    // combine all the data and hash the actual block
+    
+    constexpr int target_zero_bits = 24;
+    
+    // benchmark the time
+    auto start = std::chrono::steady_clock::now();
+    solve_for_nonce(bh1, target_zero_bits); // target zero bits are in int now and manually set, it should from bh.bits
+    auto end = std::chrono::steady_clock::now();
+    // calculate duration
+    std::chrono::duration<double, std::milli> elapsed = end - start;
 
-
+    std::cout << "Elapsed time: " << elapsed.count() << " ms\n";
+    std::cout << "Target zero bits: " << target_zero_bits << " \n";
 
     return 0;
 }
