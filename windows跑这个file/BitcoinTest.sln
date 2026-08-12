@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36310.24 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BitcoinTest", "BitcoinTest\BitcoinTest.vcxproj", "{08BF8B9F-8539-48C6-8C73-04E055F62C2D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Debug|x64.ActiveCfg = Debug|x64
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Debug|x64.Build.0 = Debug|x64
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Debug|x86.ActiveCfg = Debug|Win32
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Debug|x86.Build.0 = Debug|Win32
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Release|x64.ActiveCfg = Release|x64
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Release|x64.Build.0 = Release|x64
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Release|x86.ActiveCfg = Release|Win32
+		{08BF8B9F-8539-48C6-8C73-04E055F62C2D}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {61F0EB7D-1ED3-4487-8EF6-74641F4311F7}
+	EndGlobalSection
+EndGlobal
