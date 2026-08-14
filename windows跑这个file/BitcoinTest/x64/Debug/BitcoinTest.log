@@ -80,7 +80,6 @@ C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\include\cuda_runtime_ap
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\include\cuda_runtime_api.h(13711): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\include\cuda_runtime_api.h(14214): warning C4819: The file contains a character that cannot be represented in the current code page (936). Save the file in Unicode format to prevent data loss
   BitcoinCUDA.cu
-  tmpxft_00005cf8_00000000-7_BitcoinCUDA.cudafe1.cpp
+  tmpxft_00006d90_00000000-7_BitcoinCUDA.cudafe1.cpp
   The vcpkg manifest was disabled, but we found a manifest file in D:\Unity\Project\AI\Ai Assignment\bitcoin-miner\. You may want to enable vcpkg manifests in your properties page or pass /p:VcpkgEnableManifest=true to the msbuild invocation.
-  BitcoinTest.cpp
   BitcoinTest.vcxproj -> D:\Unity\Project\AI\Ai Assignment\bitcoin-miner\windows跑这个file\x64\Debug\BitcoinTest.exe
