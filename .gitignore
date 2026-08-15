@@ -1,1 +1,21 @@
-/build
+# CMake build directories
+/build/
+/out/
+
+# Visual Studio / MSBuild artifacts (cuda/vs-project)
+x64/
+x86/
+Debug/
+Release/
+.vs/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.lib
+
+# Editor/OS cruft
+.vscode/
+*.swp
+.DS_Store
