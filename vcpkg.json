@@ -1,6 +1,7 @@
 {
   "name": "bitcoin-miner",
   "version-string": "0.1.0",
+  "builtin-baseline": "ddf0518c31a259dcc359fd4c7bcb1ce8a27e9855",
   "dependencies": [
     "openssl"
   ]

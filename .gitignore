@@ -14,8 +14,16 @@ Release/
 *.idb
 *.exp
 *.lib
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+vs-project/
 
 # Editor/OS cruft
 .vscode/
 *.swp
 .DS_Store
+
+# vcpkg
+vcpkg_installed/
