@@ -32,3 +32,16 @@ cmake --build build --config Release
 # 3. Run the compiled executable
 .\build\Release\miner.exe
 ```
+
+
+
+# Run
+
+Run AMD
+```bash
+hipify-perl cuda/BitcoinCUDA.cu > cuda/BitcoinHIP.cpp
+hipcc -x hip cuda/BitcoinHIP.cpp -o hip_miner -O3 --offload-arch=gfx1200
+./hip_miner
+
+
+```

@@ -1,0 +1,93 @@
+GPU: AMD Radeon Graphics
+Streaming Multiprocessors: 16
+CUDA blocks: 512
+Threads per block: 256
+Total active logical CUDA threads: 131072
+
+============================
+CUDA Mining Result
+============================
+Nonce: 2643987824
+Hash: 000000f2db38c795adb6f6bfadd1895e03e5c1442104f4b80225d0b20816459a
+Target zero bits: 24
+GPU kernel time: 485.156 ms
+
+GPU: AMD Radeon Graphics
+Streaming Multiprocessors: 16
+CUDA blocks: 512
+Threads per block: 256
+Total active logical CUDA threads: 131072
+
+============================
+CUDA Mining Result
+============================
+Nonce: 1264605058
+Hash: 000000004b21bbd926dd9b27f9ab7aec1e1a5cef9c0d0ea059e05999b48171fc
+Target zero bits: 30
+GPU kernel time: 1149.31 ms
+
+GPU: AMD Radeon Graphics
+Streaming Multiprocessors: 16
+CUDA blocks: 512
+Threads per block: 256
+Total active logical CUDA threads: 131072
+
+============================
+CUDA Mining Result
+============================
+No valid nonce found.
+Target zero bits: 36
+GPU kernel time: 4855.47 ms
+
+
+
+----------------------------------------------------------------------------------------
+
+
+
+GPU: Tesla T4
+Streaming Multiprocessors: 40
+CUDA blocks: 1280
+Threads per block: 256
+Total active logical CUDA threads: 327680
+
+============================
+CUDA Mining Result
+============================
+Nonce: 840181580
+Hash: 000000538996959c348218272e6b209fdfe4f0317c404f04c0b78c2f5f6948e1
+Target zero bits: 24
+GPU kernel time: 152.709 ms
+
+GPU: Tesla T4
+Streaming Multiprocessors: 40
+CUDA blocks: 1280
+Threads per block: 256
+Total active logical CUDA threads: 327680
+
+============================
+CUDA Mining Result
+============================
+Nonce: 2342333212
+Hash: 000000024f0b88b01d1ee4cede0f1b79d233dbab3d9ebb6365aee8611669cc65
+Target zero bits: 30
+GPU kernel time: 2885.72 ms
+
+
+GPU: Tesla T4
+Streaming Multiprocessors: 40
+CUDA blocks: 1280
+Threads per block: 256
+Total active logical CUDA threads: 327680
+
+============================
+CUDA Mining Result
+============================
+No valid nonce found.
+Target zero bits: 36
+GPU kernel time: 11699.9 ms
+
+
+
+
+

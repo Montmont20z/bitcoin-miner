@@ -11,6 +11,7 @@
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
 constexpr char PUBLIC_KEY[] = "0350929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d51bfbcef1a81c3b16";
+constexpr int target_zero_bits = 24;
 
 struct VarInt {
     uint64_t value;
@@ -232,7 +233,6 @@ int main(){
     
     // std::cout << "input: " << txin.prev_index<< "\n"; 
     
-    constexpr int target_zero_bits = 24;
     
     // benchmark the time
     auto start = std::chrono::steady_clock::now();
