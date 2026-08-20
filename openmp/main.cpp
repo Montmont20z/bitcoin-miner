@@ -1,4 +1,5 @@
 
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <iomanip>
@@ -8,13 +9,16 @@
 #include <vector>
 #include <openssl/evp.h>
 #include <chrono>
+#include <fstream>
 #include <omp.h>
 #include <atomic>
 
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
 constexpr char PUBLIC_KEY[] = "0350929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d51bfbcef1a81c3b16";
-constexpr int target_zero_bits = 24;
+constexpr int target_zero_bits = 28;
+constexpr char CSV_LOG_PATH[] = "mining_benchmark.csv";
+
 
 struct VarInt {
     uint64_t value;
@@ -73,7 +77,22 @@ struct Block {
 int leading_zero_bits(const std::string& hash /* raw bytes */){
     int count = 0;
     for (unsigned char byte : hash){
-        if (byte == 0){ count += 8; continue; } // currently 1 byte is 0 ~= 0000 0000
+        if (byte == 0){ count += 8; continue; } // currently 1 byte is 0 ~= 0b0000 0000
+
+        for (int bit = 7; bit >= 0; --bit){
+           if ((byte >> bit) & 1) return count; 
+           count++;
+        }
+    }
+    // return the total amount of leading zero in int 
+    return count;
+}
+
+int leading_zero_bits_bytes(const uint8_t* hash, size_t len){
+    int count = 0;
+    for (size_t i = 0; i < len; ++i){
+        uint8_t byte = hash[i];
+        if (byte == 0){ count += 8; continue; }
 
         for (int bit = 7; bit >= 0; --bit){
            if ((byte >> bit) & 1) return count; 
@@ -104,6 +123,38 @@ std::string sha256(const std::string& input){
     EVP_MD_CTX_free(context);
 
     return std::string(reinterpret_cast<char*>(hash), length_of_hash);  // raw 32 byte
+}
+
+// RAII holder for a per-thread EVP_MD_CTX. Paired with the `thread_local`
+// instance inside sha256d_80(), this means each OpenMP thread allocates its
+// digest context exactly once (not once per nonce) and it is freed
+// automatically when the thread exits — no leak, no per-hash malloc/free.
+struct Sha256Ctx {
+    EVP_MD_CTX* ctx;
+    Sha256Ctx() : ctx(EVP_MD_CTX_new()) {}
+    ~Sha256Ctx() { EVP_MD_CTX_free(ctx); }
+};
+
+// Fast-path double-SHA256 specialized for the fixed 80-byte block header.
+// Unlike sha256(), this never touches std::string: it reads straight out of
+// the caller's 80-byte buffer and writes straight into a 32-byte output
+// buffer, and it reuses one thread-local EVP_MD_CTX across every nonce a
+// thread tries instead of allocating a fresh context per call. This is the
+// function the hot mining loop should call.
+void sha256d_80(const uint8_t header[80], uint8_t out[32]){
+    thread_local Sha256Ctx tls_ctx;
+    EVP_MD_CTX* ctx = tls_ctx.ctx;
+    
+    uint8_t first[32];
+    unsigned int len = 0;
+    
+    EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(ctx, header, 80);
+    EVP_DigestFinal_ex(ctx, first, &len);
+ 
+    EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(ctx, first, 32);
+    EVP_DigestFinal_ex(ctx, out, &len);
 }
 
 std::string byte_to_hex(const std::string& raw){
@@ -140,7 +191,100 @@ void hex_to_array(const std::string& hex, uint8_t* out, size_t out_len) {
         out[i] = static_cast<uint8_t>(std::stoi(hex.substr(i * 2, 2), nullptr, 16));
 }
 
-std::string solve_for_nonce_parallel( BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
+
+// Appends one benchmark run to a CSV log, writing the header row the first
+// time the file is created. Safe to call every run — subsequent runs just
+// append a new row so results accumulate across executions.
+void log_csv_result(const std::string& path, int threads, int target_bits,
+                     double elapsed_ms, double hashes_per_sec,
+                     uint64_t hash_count, uint32_t nonce_found,
+                     const std::string& hash_hex){
+    bool file_exists = std::ifstream(path).good();
+    std::ofstream ofs(path, std::ios::app);
+    if (!ofs){
+        std::cerr << "log_csv_result: failed to open " << path << " for writing\n";
+        return;
+    }
+    if (!file_exists){
+        ofs << "timestamp,threads,target_zero_bits,elapsed_ms,hashes_per_sec,hash_count,nonce,hash_hex\n";
+    }
+ 
+    std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    ofs << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S") << ","
+        << threads << ","
+        << target_bits << ","
+        << std::fixed << std::setprecision(3) << elapsed_ms << ","
+        << std::fixed << std::setprecision(2) << hashes_per_sec << ","
+        << hash_count << ","
+        << nonce_found << ","
+        << hash_hex << "\n";
+}
+
+// Result of a mining attempt: whether a solution was found, its nonce/hash,
+// and the total number of hashes computed across all threads (needed to
+// report hashes/second back in main()).
+struct MiningResult {
+    bool found = false;
+    uint32_t nonce = 0;
+    std::string hash_hex;
+    uint64_t hash_count = 0;
+};
+
+MiningResult solve_for_nonce_parallel(BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
+    int total_threads = omp_get_max_threads();
+    std::atomic<bool> found{false};
+    std::atomic<uint64_t> total_hashes{0};
+    MiningResult result;
+    
+    // Static chunk iteration: split the nonce space [0, max_nonce] into one
+    // contiguous block per thread (thread ID picks its own [chunk_start,
+    // chunk_end) range and walks it sequentially), instead of the previous
+    // round-robin stride (n += total_threads) where every thread touched
+    // interleaved nonces. Contiguous per-thread chunks keep bh.nonce
+    // incrementing by 1 within a thread, which is friendlier to branch
+    // prediction and keeps each thread's work assignment fixed and
+    // predictable up front rather than interleaved.
+    uint64_t range = static_cast<uint64_t>(max_nonce) + 1;
+    uint64_t chunk_size = (range + static_cast<uint64_t>(total_threads) - 1) / total_threads;
+    
+    #pragma omp parallel firstprivate(bh)
+    {
+        int ID = omp_get_thread_num();
+        uint64_t chunk_start = static_cast<uint64_t>(ID) * chunk_size;
+        uint64_t chunk_end = std::min(chunk_start + chunk_size, range); // exclusive
+        uint64_t local_hashes = 0;
+
+        for (uint64_t n = chunk_start; n < chunk_end && !found.load(std::memory_order_relaxed); ++n){
+            bh.nonce = static_cast<uint32_t>(n);
+            
+            uint8_t hash[32];
+            sha256d_80(reinterpret_cast<const uint8_t*>(&bh), hash); // fast path: no string alloc
+            ++local_hashes;
+
+
+            if (leading_zero_bits_bytes(hash, 32) >= target_zero_bits){
+                bool expected = false;
+                if (found.compare_exchange_strong(expected, true)){
+                    #pragma omp critical
+                    {
+                        result.hash_hex = byte_to_hex(std::string(reinterpret_cast<char*>(hash), 32));
+                        result.nonce = bh.nonce;
+                        result.found = true;
+                        std::cout << "nonce: " << n << " hash: " << result.hash_hex << "\n"; // TODO: remove when optimize for performance
+                    }
+                }
+                break;
+            }
+            
+        }
+        total_hashes.fetch_add(local_hashes, std::memory_order_relaxed);
+    }
+    result.hash_count = total_hashes.load();
+    return result; // hash_hex empty / found == false if exhausted without a solution
+    
+}
+
+std::string solve_for_nonce_parallel_stride( BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
     int total_threads = omp_get_max_threads();
     std::atomic<bool> found{false};
     std::string solution = "";
@@ -237,13 +381,27 @@ int main(){
     
     // benchmark the time
     auto start = std::chrono::steady_clock::now();
-    solve_for_nonce_parallel(bh1, target_zero_bits); // target zero bits are in int now and manually set, it should from bh.bits
+    MiningResult mining_result = solve_for_nonce_parallel(bh1, target_zero_bits); // target zero bits are in int now and manually set, it should from bh.bits
     auto end = std::chrono::steady_clock::now();
     // calculate duration
     std::chrono::duration<double, std::milli> elapsed = end - start;
+    
+    double elapsed_sec = elapsed.count() / 1000.0;
+    double hashes_per_sec = elapsed_sec > 0.0
+        ? static_cast<double>(mining_result.hash_count) / elapsed_sec
+        : 0.0;
+
 
     std::cout << "Elapsed time: " << elapsed.count() << " ms\n";
     std::cout << "Target zero bits: " << target_zero_bits << " \n";
+    std::cout << "Threads: " << omp_get_max_threads() << "\n";
+    std::cout << "Hashes computed: " << mining_result.hash_count << "\n";
+    std::cout << "Hashes/sec: " << std::fixed << std::setprecision(2) << hashes_per_sec << "\n";
+    
+    log_csv_result(CSV_LOG_PATH, omp_get_max_threads(), target_zero_bits,
+               elapsed.count(), hashes_per_sec, mining_result.hash_count,
+               mining_result.nonce, mining_result.hash_hex);
+
 
     return 0;
 }
