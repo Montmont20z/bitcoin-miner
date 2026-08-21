@@ -468,7 +468,8 @@ void mine_kernel(
     uint32_t max_nonce,
     int* found,
     uint32_t* winning_nonce,
-    uint8_t* winning_hash)
+    uint8_t* winning_hash,
+    unsigned long long* total_hashes)
 {
     // --------------------------------------------------------
     // Unique global thread ID
@@ -500,6 +501,11 @@ void mine_kernel(
         header[i] = c_block_header[i];
     }
 
+    // Count hashes completed by this thread locally.
+    // We only use atomicAdd when the thread exits, avoiding one global
+    // atomic operation for every SHA256d calculation.
+    unsigned long long local_hash_count = 0;
+
     // ========================================================
     // GRID-STRIDE LOOP
     //
@@ -523,6 +529,8 @@ void mine_kernel(
 
         if (atomicAdd(found, 0) != 0)
         {
+            if (local_hash_count > 0)
+                atomicAdd(total_hashes, local_hash_count);
             return;
         }
 
@@ -565,6 +573,8 @@ void mine_kernel(
             hash
         );
 
+        ++local_hash_count;
+
         // ----------------------------------------------------
         // Check difficulty
         // ----------------------------------------------------
@@ -587,9 +597,15 @@ void mine_kernel(
                 }
             }
 
+            if (local_hash_count > 0)
+                atomicAdd(total_hashes, local_hash_count);
             return;
         }
     }
+
+    // Thread exhausted its assigned nonce sequence without finding a winner.
+    if (local_hash_count > 0)
+        atomicAdd(total_hashes, local_hash_count);
 }
 
 
@@ -750,6 +766,8 @@ int main(int argc, char* argv[])
 
     uint8_t* d_winning_hash = nullptr;
 
+    unsigned long long* d_total_hashes = nullptr;
+
 
     CUDA_CHECK(
         cudaMalloc(
@@ -769,6 +787,13 @@ int main(int argc, char* argv[])
         cudaMalloc(
             reinterpret_cast<void**>(&d_winning_hash),
             32
+        )
+    );
+
+    CUDA_CHECK(
+        cudaMalloc(
+            reinterpret_cast<void**>(&d_total_hashes),
+            sizeof(unsigned long long)
         )
     );
 
@@ -798,6 +823,14 @@ int main(int argc, char* argv[])
             d_winning_hash,
             0,
             32
+        )
+    );
+
+    CUDA_CHECK(
+        cudaMemset(
+            d_total_hashes,
+            0,
+            sizeof(unsigned long long)
         )
     );
 
@@ -901,7 +934,8 @@ int main(int argc, char* argv[])
             0xFFFFFFFFu,
             d_found,
             d_winning_nonce,
-            d_winning_hash
+            d_winning_hash,
+            d_total_hashes
             );
 
 
@@ -947,6 +981,8 @@ int main(int argc, char* argv[])
 
     uint8_t winning_hash[32]{};
 
+    unsigned long long total_hashes = 0;
+
 
     CUDA_CHECK(
         cudaMemcpy(
@@ -973,6 +1009,15 @@ int main(int argc, char* argv[])
             winning_hash,
             d_winning_hash,
             32,
+            cudaMemcpyDeviceToHost
+        )
+    );
+
+    CUDA_CHECK(
+        cudaMemcpy(
+            &total_hashes,
+            d_total_hashes,
+            sizeof(unsigned long long),
             cudaMemcpyDeviceToHost
         )
     );
@@ -1017,6 +1062,21 @@ int main(int argc, char* argv[])
         << elapsed_ms
         << " ms\n";
 
+    const double elapsed_seconds = static_cast<double>(elapsed_ms) / 1000.0;
+    const double hashes_per_second =
+        (elapsed_seconds > 0.0) ? static_cast<double>(total_hashes) / elapsed_seconds : 0.0;
+
+    std::cout
+        << "Total Hash: "
+        << total_hashes
+        << "\n";
+
+    std::cout
+        << std::fixed << std::setprecision(2)
+        << "Hash/sec: "
+        << hashes_per_second
+        << " H/s\n";
+
 
     // ========================================================
     // 13. CLEANUP
@@ -1040,6 +1100,10 @@ int main(int argc, char* argv[])
 
     CUDA_CHECK(
         cudaFree(d_winning_hash)
+    );
+
+    CUDA_CHECK(
+        cudaFree(d_total_hashes)
     );
 
 
