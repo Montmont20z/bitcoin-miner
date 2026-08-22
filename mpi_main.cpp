@@ -1,6 +1,7 @@
 #include <mpi.h>
-#include <openssl/sha.h>
 
+#define OPENSSL_SUPPRESS_DEPRECATED
+#include <openssl/sha.h>
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
 
 // MPI Bitcoin-style nonce miner for the PDC assignment.
 // It intentionally uses the same fixed 80-byte header as serial/main.cpp and
@@ -142,6 +144,98 @@ void double_sha256(BlockHeader header, uint32_t nonce, uint8_t output[SHA256_DIG
     SHA256(first, sizeof(first), output);
 }
 
+class MidstateHasher {
+public:
+    explicit MidstateHasher(const BlockHeader& header) {
+        const uint8_t* raw = reinterpret_cast<const uint8_t*>(&header);
+
+        SHA256_Init(&midstate_);
+        SHA256_Transform(&midstate_, raw);            // absorb the constant block 0
+
+        std::memset(tail_, 0, sizeof(tail_));
+        std::memcpy(tail_, raw + 64, 16);             // header bytes 64..79
+        tail_[16] = 0x80;                             // padding marker
+        tail_[62] = 0x02;                             // 80 bytes = 640 bits = 0x0280
+        tail_[63] = 0x80;
+
+        std::memset(block2_, 0, sizeof(block2_));
+        block2_[32] = 0x80;                           // padding after the 32-byte digest
+        block2_[62] = 0x01;                           // 32 bytes = 256 bits = 0x0100
+
+        SHA256_Init(&iv_);
+        work1_ = midstate_;
+        work2_ = iv_;
+    }
+
+    // Hashes one nonce. Writes the digest as 8 big-endian words into `out` and
+    // returns its leading-zero-bit count.
+    inline int hash(uint32_t nonce, uint32_t out[8]) {
+        // The nonce sits at header offset 76, i.e. offset 12 inside block 1.
+        // memcpy of the host uint32 reproduces the exact bytes the reference
+        // path would have produced via `header.nonce = nonce`.
+        std::memcpy(tail_ + 12, &nonce, sizeof(nonce));
+
+        std::memcpy(work1_.h, midstate_.h, sizeof(work1_.h));
+        SHA256_Transform(&work1_, tail_);
+
+        for (int i = 0; i < 8; ++i) {
+            const uint32_t word = work1_.h[i];
+            block2_[4 * i + 0] = static_cast<uint8_t>(word >> 24);
+            block2_[4 * i + 1] = static_cast<uint8_t>(word >> 16);
+            block2_[4 * i + 2] = static_cast<uint8_t>(word >> 8);
+            block2_[4 * i + 3] = static_cast<uint8_t>(word);
+        }
+
+        std::memcpy(work2_.h, iv_.h, sizeof(work2_.h));
+        SHA256_Transform(&work2_, block2_);
+
+        std::memcpy(out, work2_.h, sizeof(work2_.h));
+        return leading_zero_bits_words(out);
+    }
+
+    // Branch-free-ish replacement for the byte-then-bit loop.
+    static inline int leading_zero_bits_words(const uint32_t words[8]) {
+        for (int i = 0; i < 8; ++i) {
+            if (words[i] != 0) return i * 32 + __builtin_clz(words[i]);
+        }
+        return 256;
+    }
+
+    static void words_to_bytes(const uint32_t words[8], uint8_t out[SHA256_DIGEST_LENGTH]) {
+        for (int i = 0; i < 8; ++i) {
+            out[4 * i + 0] = static_cast<uint8_t>(words[i] >> 24);
+            out[4 * i + 1] = static_cast<uint8_t>(words[i] >> 16);
+            out[4 * i + 2] = static_cast<uint8_t>(words[i] >> 8);
+            out[4 * i + 3] = static_cast<uint8_t>(words[i]);
+        }
+    }
+
+private:
+    SHA256_CTX midstate_{};
+    SHA256_CTX iv_{};
+    SHA256_CTX work1_{};
+    SHA256_CTX work2_{};
+    alignas(64) uint8_t tail_[64]{};
+    alignas(64) uint8_t block2_[64]{};
+};
+
+void verify_midstate(const BlockHeader& header) {
+    MidstateHasher hasher(header);
+    const uint32_t probes[] = {0u, 1u, 255u, 256u, 65535u, 1000000u,
+                               0x7fffffffu, 0x80000000u, 0xffffffffu};
+    for (uint32_t nonce : probes) {
+        uint8_t reference[SHA256_DIGEST_LENGTH], fast[SHA256_DIGEST_LENGTH];
+        uint32_t words[8];
+        double_sha256(header, nonce, reference);
+        hasher.hash(nonce, words);
+        MidstateHasher::words_to_bytes(words, fast);
+        if (std::memcmp(reference, fast, SHA256_DIGEST_LENGTH) != 0) {
+            throw std::runtime_error("midstate self-test failed at nonce "
+                                     + std::to_string(nonce));
+        }
+    }
+}
+
 int leading_zero_bits(const uint8_t hash[SHA256_DIGEST_LENGTH]) {
     int count = 0;
     for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
@@ -218,13 +312,14 @@ void run_scan(const Options& options, const BlockHeader& header, int rank, int s
     MPI_Barrier(MPI_COMM_WORLD);
     const double start = MPI_Wtime();
 
-    uint8_t hash[SHA256_DIGEST_LENGTH];
+    MidstateHasher hasher(header);
+    uint32_t words[8];
     uint64_t local_hashes = 0;
     // Volatile checksum prevents an optimizing compiler from treating this as dead work.
     uint64_t checksum = 0;
     for (uint64_t n = begin; n < end; ++n) {
-        double_sha256(header, static_cast<uint32_t>(n), hash);
-        checksum += hash[0];
+        hasher.hash(static_cast<uint32_t>(n), words);
+        checksum += (words[0] >> 24);   // same value the old code took from hash[0]
         ++local_hashes;
     }
 
@@ -266,18 +361,19 @@ void run_solve(const Options& options, const BlockHeader& header, int rank, int 
     MPI_Barrier(MPI_COMM_WORLD);
     const double start = MPI_Wtime();
 
+    MidstateHasher hasher(header);
+
     if (rank == 0) {
         int completed_ranks = 0;
         bool root_done = false;
-        uint8_t hash[SHA256_DIGEST_LENGTH];
+        uint32_t words[8];
 
         while (winner == NO_NONCE && completed_ranks < size) {
             if (!root_done) {
                 const uint64_t chunk_end = std::min(end, next + options.poll_interval);
                 for (; next < chunk_end; ++next) {
-                    double_sha256(header, static_cast<uint32_t>(next), hash);
                     ++local_hashes;
-                    if (leading_zero_bits(hash) >= options.difficulty) {
+                    if (hasher.hash(static_cast<uint32_t>(next), words) >= options.difficulty) {
                         winner = next;
                         ++next;
                         break;
@@ -369,11 +465,55 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    char processor_name[MPI_MAX_PROCESSOR_NAME] = {};
+int processor_name_length = 0;
+
+MPI_Get_processor_name(
+    processor_name,
+    &processor_name_length
+);
+
+std::vector<char> all_processor_names;
+
+if (rank == 0) {
+    all_processor_names.resize(
+        size * MPI_MAX_PROCESSOR_NAME
+    );
+}
+
+MPI_Gather(
+    processor_name,
+    MPI_MAX_PROCESSOR_NAME,
+    MPI_CHAR,
+    rank == 0 ? all_processor_names.data() : nullptr,
+    MPI_MAX_PROCESSOR_NAME,
+    MPI_CHAR,
+    0,
+    MPI_COMM_WORLD
+);
+
+if (rank == 0) {
+    std::cout << "\nMPI Rank Placement\n";
+
+    for (int r = 0; r < size; ++r) {
+        const char* machine_name =
+            all_processor_names.data()
+            + r * MPI_MAX_PROCESSOR_NAME;
+
+        std::cout << "Rank " << r
+                  << " runs on machine "
+                  << machine_name << "\n";
+    }
+
+    std::cout << std::endl;
+}
+
     try {
         const Options options = parse_options(argc, argv);
         BlockHeader header{};
         if (rank == 0) header = make_shared_header();
         MPI_Bcast(&header, sizeof(header), MPI_BYTE, 0, MPI_COMM_WORLD);
+        verify_midstate(header); 
 
         if (options.mode == "scan") {
             if (options.hashes > (1ULL << 32)) {
