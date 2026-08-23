@@ -1,0 +1,10 @@
+# Compiled binaries — rebuild with mpic++, do not commit.
+miner
+miner_new
+miner_old
+*.o
+*.out
+a.out
+
+# Python scratch
+__pycache__/
