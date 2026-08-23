@@ -18,7 +18,7 @@ constexpr int SEED = 1234;
 constexpr char PUBLIC_KEY[] = "0350929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d51bfbcef1a81c3b16";
 constexpr int target_zero_bits = 24; // default; overridable via argv[1]
 constexpr char CSV_LOG_PATH[] = "mining_benchmark.csv";
-
+enum class MiningMode { Static, Stride };
 
 struct VarInt {
     uint64_t value;
@@ -292,7 +292,7 @@ struct MiningResult {
     uint64_t hash_count = 0;
 };
 
-MiningResult solve_for_nonce_parallel(BlockHeader bh, int target_zero_bits, bool use_midstate = true,
+MiningResult solve_for_nonce_parallel_static(BlockHeader bh, int target_zero_bits, bool use_midstate = true,
                                        uint32_t max_nonce = 0xFFFFFFFF){
     int total_threads = omp_get_max_threads();
     std::atomic<bool> found{false};
@@ -347,32 +347,50 @@ MiningResult solve_for_nonce_parallel(BlockHeader bh, int target_zero_bits, bool
     
 }
 
-std::string solve_for_nonce_parallel_stride( BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
+// Round-robin stride variant: thread ID picks its starting nonce and each
+// thread jumps forward by total_threads every iteration, so nonces are
+// interleaved across threads rather than contiguous (contrast with
+// solve_for_nonce_parallel_static's per-thread chunks). Kept for benchmark
+// comparison against the static-chunk approach — same fast hashing path
+// (sha256d_80, optional midstate) and same MiningResult return type as the
+// static version, just a different iteration/work-assignment strategy.
+MiningResult solve_for_nonce_parallel_stride(BlockHeader bh, int target_zero_bits, bool use_midstate = true,
+                                       uint32_t max_nonce = 0xFFFFFFFF){
     int total_threads = omp_get_max_threads();
     std::atomic<bool> found{false};
-    std::string solution = "";
+    std::atomic<uint64_t> total_hashes{0};
+    MiningResult result;
+
     #pragma omp parallel firstprivate(bh)
     {
         int ID = omp_get_thread_num();
+        uint64_t local_hashes = 0;
+
         for (uint64_t n = ID; n <= max_nonce && !found.load(std::memory_order_relaxed); n += total_threads){
             bh.nonce = static_cast<uint32_t>(n);
-            std::string header_byte(reinterpret_cast<const char*>(&bh), sizeof(bh)); // interpret bh as byte not struct
-            std::string hash = sha256(sha256(header_byte)); // double hash
-            
-            if (leading_zero_bits(hash) >= target_zero_bits){
+
+            uint8_t hash[32];
+            sha256d_80(reinterpret_cast<const uint8_t*>(&bh), hash, use_midstate); // fast path: no string alloc
+            ++local_hashes;
+
+            if (leading_zero_bits_bytes(hash, 32) >= target_zero_bits){
                 bool expected = false;
                 if (found.compare_exchange_strong(expected, true)){
                     #pragma omp critical
                     {
-                        solution = byte_to_hex(hash);
-                        std::cout << "nonce: " << n << " hash: " << solution << "\n"; // TODO: remove when optimize for performance
+                        result.hash_hex = byte_to_hex(std::string(reinterpret_cast<char*>(hash), 32));
+                        result.nonce = bh.nonce;
+                        result.found = true;
+                        std::cout << "nonce: " << n << " hash: " << result.hash_hex << "\n"; // TODO: remove when optimize for performance
                     }
                 }
                 break;
             }
         }
+        total_hashes.fetch_add(local_hashes, std::memory_order_relaxed);
     }
-    return solution; // empty if exhausted without a solution
+    result.hash_count = total_hashes.load();
+    return result; // hash_hex empty / found == false if exhausted without a solution
 }
 
 int main(int argc, char* argv[]){
@@ -385,13 +403,15 @@ int main(int argc, char* argv[]){
     //     std::cout << "Rand Number: " << dist(gen) << "\n"; 
     // }
 
-    // --- CLI args -----------------------------------------------------
+        // --- CLI args -----------------------------------------------------
     // argv[1]: target leading-zero-bit difficulty (falls back to the
     //          compile-time `target_zero_bits` constant above)
     // argv[2]: midstate optimization "1"/"0" (default: on)
-    // Usage: ./miner [target_zero_bits] [midstate_on(1|0)]
+    // argv[3]: iteration mode "static"/"stride" (default: static)
+    // Usage: ./miner [target_zero_bits] [midstate_on(1|0)] [mode(static|stride)]
     int zero_bits = target_zero_bits;
     bool use_midstate = true;
+    MiningMode mode = MiningMode::Static;
 
     if (argc > 1){
         try {
@@ -406,7 +426,18 @@ int main(int argc, char* argv[]){
         std::string flag = argv[2];
         use_midstate = !(flag == "0" || flag == "off" || flag == "false");
     }
-    
+    if (argc > 3){
+        std::string mode_flag = argv[3];
+        if (mode_flag == "stride"){
+            mode = MiningMode::Stride;
+        } else if (mode_flag == "static"){
+            mode = MiningMode::Static;
+        } else {
+            std::cerr << "Invalid mode '" << argv[3] << "', expected 'static' or 'stride'. Using static.\n";
+            mode = MiningMode::Static;
+        }
+    }
+
     /**------------------------ Create A Full Block -------------------- */ 
     // TxIn & TxOut
     TxIn txin {
@@ -465,8 +496,11 @@ int main(int argc, char* argv[]){
      };
     
     // benchmark the time
+    //     // benchmark the time
     auto start = std::chrono::steady_clock::now();
-    MiningResult mining_result = solve_for_nonce_parallel(bh1, zero_bits, use_midstate); // target zero bits are in int now and manually set, it should from bh.bits
+    MiningResult mining_result = (mode == MiningMode::Stride)
+        ? solve_for_nonce_parallel_stride(bh1, zero_bits, use_midstate)
+        : solve_for_nonce_parallel_static(bh1, zero_bits, use_midstate);
     auto end = std::chrono::steady_clock::now();
     // calculate duration
     std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -483,6 +517,7 @@ int main(int argc, char* argv[]){
     std::cout << "Threads: " << omp_get_max_threads() << "\n";
     std::cout << "Hashes computed: " << mining_result.hash_count << "\n";
     std::cout << "Hashes/sec: " << std::fixed << std::setprecision(2) << hashes_per_sec << "\n";
+    std::cout << "Mode: " << (mode == MiningMode::Stride ? "stride" : "static") << "\n";
     
     log_csv_result(CSV_LOG_PATH, omp_get_max_threads(), zero_bits, use_midstate,
                elapsed.count(), hashes_per_sec, mining_result.hash_count,
