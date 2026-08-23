@@ -182,7 +182,7 @@ Check the flag every iteration vs every 1024 iterations (batched check) and meas
 
 **Secondary metric — solve time:** mean over ≥20 mined blocks per configuration, reported with standard deviation, at difficulties k ∈ {16, 20, 24, 28} zero bits. Demonstrates the end-to-end system and lets you show the variance phenomenon itself (a good Discussion figure).
 
-**Controls:** identical header per configuration (fixed RNG seed), Release builds (`-O2`; document that `-O0` benchmarks are meaningless), pinned CPU frequency where possible, machine specs table (CPU model/cores, RTX 3070, RAM, OS, compiler versions).
+**Controls:** identical header per configuration (fixed RNG seed), Release builds (`-O3`; document that `-O0` benchmarks are meaningless), pinned CPU frequency where possible, machine specs table (CPU model/cores, RTX 3070, RAM, OS, compiler versions).
 
 **Output:** every run appends a CSV row (`backend, workers, difficulty, mode, hashes, seconds, rate`); a Python/matplotlib script in `scripts/` generates the report figures (speedup curves, efficiency, rate vs difficulty, CUDA block-size sweep).
 
