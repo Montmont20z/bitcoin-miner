@@ -1,0 +1,78 @@
+==============================================
+ Machine specification
+==============================================
+CPU(s):                                  8
+Model name:                              11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      4
+Socket(s):                               1
+SHA-NI: sha_ni
+               total        used        free      shared  buff/cache   available
+Mem:           5.6Gi       532Mi       5.1Gi       3.5Mi       202Mi       5.1Gi
+OS:       Ubuntu 26.04 LTS / kernel 6.18.33.2-microsoft-standard-WSL2
+Compiler: g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+MPI:      
+OpenSSL:  OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+NVIDIA GeForce MX330, 2048 MiB
+
+Compiling...
+  ok
+
+==============================================
+ A. Correctness  (all must return 78891794)
+==============================================
+  np=1  strided  nonce=78891794     OK
+  np=1  block    nonce=78891794     OK
+  np=2  strided  nonce=78891794     OK
+  np=2  block    nonce=2185860257   DIFFERS
+  np=4  strided  nonce=78891794     OK
+  np=4  block    nonce=2185860257   DIFFERS
+
+==============================================
+ B. Strong scaling  (--mode scan, fixed work)
+==============================================
+  midstate  np         rate_H/s    seconds  speedup efficiency
+  off       1           1680684  79.858984   1.000x     100.0%
+  off       2           2861835  46.899185   1.703x      85.1%
+  off       4           4310481  31.137529   2.565x      64.1%
+  off       8           5697516  23.557237   3.390x      42.4%
+  on        1          10798131  12.429719   1.000x     100.0%
+  on        2          18960115   7.078951   1.756x      87.8%
+  on        4          32768824   4.095897   3.035x      75.9%
+  on        8          54022550   2.484476   5.003x      62.5%
+
+==============================================
+ C. Polling interval  (np=8, difficulty 26)
+==============================================
+  poll       total_hashes       wasted    wasted%
+  1              80421309         8234  0.010239%
+  256            79103587        36143  0.045691%
+  1024           78191971        48542  0.062081%
+  4096           78539107        62421  0.079478%
+  65536          80509283      1148394  1.426412%
+
+==============================================
+ D. Decomposition  (--mode solve, difficulty 26)
+==============================================
+  decomp   np   nonce           seconds         hashes
+  strided  1    78891794       7.368423       78891795
+  strided  2    78891794       3.940777       78933386
+  strided  4    78891794       2.327027       77732549
+  block    1    78891794       7.365665       78891795
+  block    2    2185860257     3.948500       76619938
+  block    4    2185860257     4.605530      150474914
+
+==============================================
+ E. Midstate off vs on  (np=8)
+==============================================
+  midstate  bits      seconds         hashes       rate_H/s
+  off       20       0.446515        2644628        5922820
+  on        20       0.023482        1224930       52164637
+  off       24       0.450327        2675348        5940901
+  on        24       0.223321       12130868       54320319
+  off       26       0.446260        2628244        5889490
+  on        26       1.483392       79026531       53274206
+
+==============================================
+ Done -> results.csv
+==============================================

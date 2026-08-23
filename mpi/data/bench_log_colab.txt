@@ -1,0 +1,78 @@
+==============================================
+ Machine specification
+==============================================
+CPU(s):                                  2
+Model name:                              Intel(R) Xeon(R) CPU @ 2.00GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      1
+Socket(s):                               1
+SHA-NI: not present
+               total        used        free      shared  buff/cache   available
+Mem:            12Gi       898Mi       7.8Gi       2.0Mi       4.0Gi        11Gi
+OS:       Ubuntu 22.04.5 LTS / kernel 6.6.122+
+Compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+MPI:      mpirun (Open MPI) 4.1.2
+OpenSSL:  OpenSSL 3.0.2 15 Mar 2022 (Library: OpenSSL 3.0.2 15 Mar 2022)
+Tesla T4, 15360 MiB
+
+Compiling...
+  ok
+
+==============================================
+ A. Correctness  (all must return 12071324)
+==============================================
+  np=1  strided  nonce=12071324     OK
+  np=1  block    nonce=12071324     OK
+  np=2  strided  nonce=12071324     OK
+  np=2  block    nonce=2150369093   DIFFERS
+  np=4  strided  nonce=12071324     OK
+  np=4  block    nonce=2150369093   DIFFERS
+
+==============================================
+ B. Strong scaling  (--mode scan, fixed work)
+==============================================
+  midstate  np         rate_H/s    seconds  speedup efficiency
+  off       1            529066  15.855516   1.000x     100.0%
+  off       2            566189  14.815922   1.070x      53.5%
+  off       4            562968  14.900680   1.064x      26.6%
+  off       8            561721  14.933768   1.062x      13.3%
+  on        1           2619081   3.202882   1.000x     100.0%
+  on        2           1829174   4.586008   0.698x      34.9%
+  on        4           2557279   3.280287   0.976x      24.4%
+  on        8           2653137   3.161770   1.013x      12.7%
+
+==============================================
+ C. Polling interval  (np=2, difficulty 24)
+==============================================
+  poll       total_hashes       wasted    wasted%
+  1              12294603           27  0.000220%
+  256            12032719          318  0.002643%
+  1024           12120271         1352  0.011155%
+  4096           12150991         6192  0.050959%
+  65536          12392655        91550  0.738744%
+
+==============================================
+ D. Decomposition  (--mode solve, difficulty 24)
+==============================================
+  decomp   np   nonce           seconds         hashes
+  strided  1    12071324       4.643188       12071325
+  strided  2    12071324       4.539161       12076239
+  strided  4    12071324       5.827961       11401320
+  block    1    12071324       4.648122       12071325
+  block    2    2150369093     2.193259        5825350
+  block    4    2150369093     5.454765       11345734
+
+==============================================
+ E. Midstate off vs on  (np=2)
+==============================================
+  midstate  bits      seconds         hashes       rate_H/s
+  off       20       2.419232        1532685         633542
+  on        20       0.308002         795527        2582863
+  off       24      10.582027        5802822         548366
+  on        24       4.553211       12079311        2652921
+  off       26     135.984110       76475554         562386
+  on        26      32.451969       78682506        2424583
+
+==============================================
+ Done -> results.csv
+==============================================
