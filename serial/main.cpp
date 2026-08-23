@@ -11,7 +11,6 @@
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
 constexpr char PUBLIC_KEY[] = "0350929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d51bfbcef1a81c3b16";
-constexpr int target_zero_bits = 24;
 
 struct VarInt {
     uint64_t value;
@@ -137,23 +136,53 @@ void hex_to_array(const std::string& hex, uint8_t* out, size_t out_len) {
         out[i] = static_cast<uint8_t>(std::stoi(hex.substr(i * 2, 2), nullptr, 16));
 }
 
-std::string solve_for_nonce( BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFF){
+struct MiningResult {
+    bool found = false;
+    uint32_t nonce = 0;
+    std::string hash_hex;
+    uint64_t total_hashes = 0;
+};
+
+MiningResult solve_for_nonce(BlockHeader bh, int target_zero_bits, uint32_t max_nonce = 0xFFFFFFFFu){
+    MiningResult result;
+
     for (uint32_t n = 0;; ++n){
         bh.nonce = n;
-        std::string header_byte(reinterpret_cast<const char*>(&bh), sizeof(bh)); // interpret bh as byte not struct
-        std::string hash = sha256(sha256(header_byte)); // double hash
+        std::string header_byte(reinterpret_cast<const char*>(&bh), sizeof(bh));
+        std::string hash = sha256(sha256(header_byte));
+
+        ++result.total_hashes;
 
         if (leading_zero_bits(hash) >= target_zero_bits){
-            std::cout << "nonce: " << n << " hash: " << byte_to_hex(hash) << "\n"; // TODO: remove when optimize for performance
-            bh.nonce = n; // not strictly needed since bh is local, but explicit
-            return byte_to_hex(hash);
+            result.found = true;
+            result.nonce = n;
+            result.hash_hex = byte_to_hex(hash);
+            return result;
         }
-        if (n == max_nonce) break; // guard against uint32_t wraparound → infinite loop
+
+        if (n == max_nonce) break;
     }
-    return ""; // exhausted nonce space without a solution
+
+    return result;
 }
 
-int main(){
+int main(int argc, char* argv[]){
+    int target_zero_bits = 24;
+
+    if (argc >= 2) {
+        try {
+            target_zero_bits = std::stoi(argv[1]);
+        } catch (...) {
+            std::cerr << "Invalid leading zero bits. Example: ./bitcoin_cpu 24\n";
+            return 1;
+        }
+    }
+
+    if (target_zero_bits < 0 || target_zero_bits > 256) {
+        std::cerr << "Leading zero bits must be between 0 and 256.\n";
+        return 1;
+    }
+
     // Initialize the standard 32-bit Mersenne Twister engine with the seed
     std::mt19937 gen(SEED);
     // Uniform distribution for integers in [1, 100]
@@ -236,13 +265,35 @@ int main(){
     
     // benchmark the time
     auto start = std::chrono::steady_clock::now();
-    solve_for_nonce(bh1, target_zero_bits); // target zero bits are in int now and manually set, it should from bh.bits
+    MiningResult result = solve_for_nonce(bh1, target_zero_bits);
     auto end = std::chrono::steady_clock::now();
-    // calculate duration
-    std::chrono::duration<double, std::milli> elapsed = end - start;
 
-    std::cout << "Elapsed time: " << elapsed.count() << " ms\n";
-    std::cout << "Target zero bits: " << target_zero_bits << " \n";
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    const double elapsed_seconds = elapsed.count() / 1000.0;
+    const double hashes_per_second =
+        (elapsed_seconds > 0.0)
+            ? static_cast<double>(result.total_hashes) / elapsed_seconds
+            : 0.0;
+
+    std::cout << "\n============================\n";
+    std::cout << "CPU Mining Result\n";
+    std::cout << "============================\n";
+
+    if (result.found) {
+        std::cout << "Nonce: " << result.nonce << "\n";
+        std::cout << "Hash: " << result.hash_hex << "\n";
+        std::cout << "Valid: Yes\n";
+    } else {
+        std::cout << "No valid nonce found.\n";
+        std::cout << "Valid: No\n";
+    }
+
+    std::cout << "Target zero bits: " << target_zero_bits << "\n";
+    std::cout << "Elapsed time: " << std::fixed << std::setprecision(3)
+              << elapsed.count() << " ms\n";
+    std::cout << "Total Hash: " << result.total_hashes << "\n";
+    std::cout << "Hash/sec: " << std::fixed << std::setprecision(2)
+              << hashes_per_second << " H/s\n";
 
     return 0;
 }
