@@ -1,9 +1,7 @@
 #include <mpi.h>
 
-// SHA256_Transform is deprecated in OpenSSL 3.x but still exported; it is the
-// only way to drive the tuned assembly core one block at a time.
-#define OPENSSL_SUPPRESS_DEPRECATED
-#include <openssl/sha.h>
+// SHA-256 is implemented from scratch in core/sha256.h
+#include "sha256.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -32,6 +30,9 @@ struct BlockHeader {
     uint32_t nonce;
 };
 #pragma pack(pop)
+
+// Supplied by <openssl/sha.h> before
+constexpr int SHA256_DIGEST_LENGTH = 32;
 
 static_assert(sizeof(BlockHeader) == 80, "BlockHeader must be exactly 80 bytes");
 
@@ -151,87 +152,38 @@ BlockHeader make_shared_header() {
 
 void double_sha256(BlockHeader header, uint32_t nonce, uint8_t output[SHA256_DIGEST_LENGTH]) {
     header.nonce = nonce;
-    uint8_t first[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(&header), sizeof(header), first);
-    SHA256(first, sizeof(first), output);
+    //sha256 implement, none midstate
+    sha2::sha256d_80(&header, output, /*got midstate = */false);
 }
 
 class MidstateHasher {
 public:
-    explicit MidstateHasher(const BlockHeader& header) {
-        const uint8_t* raw = reinterpret_cast<const uint8_t*>(&header);
+    explicit MidstateHasher(const BlockHeader& header) : impl_(&header) {}
 
-        SHA256_Init(&midstate_);
-        SHA256_Transform(&midstate_, raw);            // absorb the constant block 0
-
-        std::memset(tail_, 0, sizeof(tail_));
-        std::memcpy(tail_, raw + 64, 16);             // header bytes 64..79
-        tail_[16] = 0x80;                             // padding marker
-        tail_[62] = 0x02;                             // 80 bytes = 640 bits = 0x0280
-        tail_[63] = 0x80;
-
-        std::memset(block2_, 0, sizeof(block2_));
-        block2_[32] = 0x80;                           // padding after the 32-byte digest
-        block2_[62] = 0x01;                           // 32 bytes = 256 bits = 0x0100
-
-        SHA256_Init(&iv_);
-        work1_ = midstate_;
-        work2_ = iv_;
-    }
-
-    // Hashes one nonce. Writes the digest as 8 big-endian words into `out` and
-    // returns its leading-zero-bit count.
     inline int hash(uint32_t nonce, uint32_t out[8]) {
-        // The nonce sits at header offset 76, i.e. offset 12 inside block 1.
-        // memcpy of the host uint32 reproduces the exact bytes the reference
-        // path would have produced via `header.nonce = nonce`.
-        std::memcpy(tail_ + 12, &nonce, sizeof(nonce));
-
-        std::memcpy(work1_.h, midstate_.h, sizeof(work1_.h));
-        SHA256_Transform(&work1_, tail_);
-
-        for (int i = 0; i < 8; ++i) {
-            const uint32_t word = work1_.h[i];
-            block2_[4 * i + 0] = static_cast<uint8_t>(word >> 24);
-            block2_[4 * i + 1] = static_cast<uint8_t>(word >> 16);
-            block2_[4 * i + 2] = static_cast<uint8_t>(word >> 8);
-            block2_[4 * i + 3] = static_cast<uint8_t>(word);
-        }
-
-        std::memcpy(work2_.h, iv_.h, sizeof(work2_.h));
-        SHA256_Transform(&work2_, block2_);
-
-        std::memcpy(out, work2_.h, sizeof(work2_.h));
-        return leading_zero_bits_words(out);
+        impl_.hash_words(nonce, out);
+        return sha2::leading_zero_bits_words(out);
     }
 
-    // Branch-free-ish replacement for the byte-then-bit loop.
     static inline int leading_zero_bits_words(const uint32_t words[8]) {
-        for (int i = 0; i < 8; ++i) {
-            if (words[i] != 0) return i * 32 + __builtin_clz(words[i]);
-        }
-        return 256;
+        return sha2::leading_zero_bits_words(words);
     }
 
     static void words_to_bytes(const uint32_t words[8], uint8_t out[SHA256_DIGEST_LENGTH]) {
-        for (int i = 0; i < 8; ++i) {
-            out[4 * i + 0] = static_cast<uint8_t>(words[i] >> 24);
-            out[4 * i + 1] = static_cast<uint8_t>(words[i] >> 16);
-            out[4 * i + 2] = static_cast<uint8_t>(words[i] >> 8);
-            out[4 * i + 3] = static_cast<uint8_t>(words[i]);
-        }
+        sha2::words_to_bytes(words, out);
     }
 
 private:
-    SHA256_CTX midstate_{};
-    SHA256_CTX iv_{};
-    SHA256_CTX work1_{};
-    SHA256_CTX work2_{};
-    alignas(64) uint8_t tail_[64]{};
-    alignas(64) uint8_t block2_[64]{};
+    sha2::Midstate impl_;
 };
 
 void verify_midstate(const BlockHeader& header) {
+    // Layer 1: the hand-written SHA-256 core against the FIPS 180-4 vectors.
+    if (!sha2::self_test()) {
+        throw std::runtime_error("SHA-256 core failed the FIPS 180-4 test vectors");
+    }
+    // Layer 2: the midstate fast path against the plain path.
+
     MidstateHasher hasher(header);
     const uint32_t probes[] = {0u, 1u, 255u, 256u, 65535u, 1000000u,
                                0x7fffffffu, 0x80000000u, 0xffffffffu};

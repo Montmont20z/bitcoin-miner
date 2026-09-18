@@ -1,5 +1,5 @@
 #include <mpi.h>
-#include <openssl/sha.h>
+#include "sha256.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -29,6 +29,9 @@ struct BlockHeader {
 #pragma pack(pop)
 
 static_assert(sizeof(BlockHeader) == 80, "BlockHeader must be exactly 80 bytes");
+// Supplied by <openssl/sha.h> before;  
+constexpr int SHA256_DIGEST_LENGTH = 32;
+
 
 namespace {
 
@@ -137,9 +140,7 @@ BlockHeader make_shared_header() {
 
 void double_sha256(BlockHeader header, uint32_t nonce, uint8_t output[SHA256_DIGEST_LENGTH]) {
     header.nonce = nonce;
-    uint8_t first[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(&header), sizeof(header), first);
-    SHA256(first, sizeof(first), output);
+    sha2::sha256d_80(&header, output, /*got midstate=*/false);
 }
 
 int leading_zero_bits(const uint8_t hash[SHA256_DIGEST_LENGTH]) {

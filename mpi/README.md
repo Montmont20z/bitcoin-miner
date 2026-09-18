@@ -1,32 +1,39 @@
 # MPI Bitcoin Block Mining (SHA-256 Proof-of-Work)
-
-MPI backend for the BMCS3003 Distributed Systems and Parallel Computing assignment.
-Mok Shao Kang (25WMR09892).
-
-The miner searches the 32-bit nonce space of a fixed 80-byte Bitcoin block header for a
-double-SHA256 digest with at least *K* leading zero bits, distributing the search across
-MPI processes.
-
 ---
 
 ## Build
 
+SHA-256 is implemented from scratch in `../core/` -- no crypto library is
+linked. Both the header path and `core/sha256.cpp` are required:
+
 ```bash
-mpic++ -O3 -std=c++17 mpi_main.cpp -lcrypto -o miner
+mpic++ -O3 -march=native -I../core -std=c++17 -o miner_new \
+       mpi_main.cpp ../core/sha256.cpp
+
+mpic++ -O3 -march=native -I../core -std=c++17 -o miner_old \
+       mpi_main_baseline.cpp ../core/sha256.cpp
 ```
 
-Requires an MPI implementation and OpenSSL headers:
+Requires an MPI implementation only:
 
 ```bash
-sudo apt install build-essential openmpi-bin libopenmpi-dev libssl-dev
+sudo apt install build-essential openmpi-bin libopenmpi-dev
+```
+
+Verify the build links no crypto library and still finds the known nonce:
+
+```bash
+ldd miner_new | grep -c crypto                          # must print 0
+mpirun -np 1 ./miner_new --mode solve --difficulty 20   # Nonce: 755468
+mpirun -np 1 ./miner_old --mode solve --difficulty 20   # Nonce: 755468
 ```
 
 `mpi_main_baseline.cpp` is the pre-optimisation version used as the "midstate off"
 reference in Section 4.7.3 of the report. Build it the same way.
 
 Compiled binaries are deliberately not committed — they are linked against one specific
-MPI and OpenSSL build and will not run elsewhere. `.gitignore` excludes them; rebuild
-from source with the command above.
+MPI build and will not run elsewhere. `.gitignore` excludes them; rebuild from source
+with the command above.
 
 ---
 
@@ -60,27 +67,6 @@ mpirun -np 4 ./miner --mode solve --difficulty 26
 
 On a machine where you are root (Google Colab, for instance) add
 `--allow-run-as-root`. To run more processes than cores, add `--oversubscribe`.
-
----
-
-## Implementation notes
-
-**Strided decomposition.** Process *r* of *P* evaluates nonces `r, r+P, r+2P, …`, so every
-process crosses the whole space at 1/P density. The globally smallest solution is therefore
-reached first and the answer matches the serial implementation at any process count. The
-`block` alternative — one contiguous slice per process — is retained behind `--decomp` for
-the comparison in Section 4.5.3, where it returns a different (still valid) nonce as soon as
-more than one process is used.
-
-**Midstate optimisation.** The 80-byte header spans two SHA-256 message blocks and only the
-final four bytes change between candidates, so the state after the constant first block is
-computed once and reused. The optimised path also calls `SHA256_Transform` directly rather
-than the one-shot `SHA256()`, which under OpenSSL 3.x routes through the EVP provider layer
-on every invocation. Together these give 6.42x at one process on a SHA-NI capable CPU.
-
-**Self-test.** `verify_midstate()` runs at start-up and compares the fast path against the
-reference OpenSSL path on nine boundary nonces, aborting on any mismatch. The coordinator
-also re-verifies a winning nonce through the unoptimised path before reporting it.
 
 ---
 
@@ -170,7 +156,6 @@ which is why exhaustive runs at higher difficulties report no result.
 | OS | Ubuntu 22.04.5 | Ubuntu 26.04 (WSL2) |
 | Compiler | GCC 11.4.0 | GCC 15.2.0 |
 | Open MPI | 4.1.2 | 5.0.10 |
-| OpenSSL | 3.0.2 | 3.5.5 |
 
 Speedup is always computed against a baseline measured on the same platform. Throughput in
 hashes per second is the only quantity compared across platforms.

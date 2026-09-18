@@ -7,11 +7,11 @@
 #include <ratio>
 #include <sstream>
 #include <vector>
-#include <openssl/evp.h>
 #include <chrono>
 #include <fstream>
 #include <omp.h>
 #include <atomic>
+#include "sha256.h"
 
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
@@ -103,6 +103,8 @@ int leading_zero_bits_bytes(const uint8_t* hash, size_t len){
     return count;
 }
 
+//This is library OpenSSL sha256------------------------------
+/*
 std::string sha256(const std::string& input){
     EVP_MD_CTX* context = EVP_MD_CTX_new();
     if (!context) return "";
@@ -212,6 +214,27 @@ void sha256d_80(const uint8_t header[80], uint8_t out[32], bool use_midstate){
 
     sha256_single(tls_ctx.ctx, first, 32, out); // pass 2: hash pass 1's 32-byte digest
 }
+*/
+//UNTIL HERE ,CHECK--------------------------
+
+//NEW sha256
+// ---------------------------------------------------------------------------
+//  SHA-256 now comes from core/sha256.h, the single implementation shared by
+//  the serial, OpenMP, MPI and CUDA backends. Everything that used to live
+//  here -- the EVP wrapper, Sha256Ctx, the Midstate struct, sha256_single and
+//  sha256d_80 -- is gone; the header provides the same two entry points with
+//  the same signatures, so the call sites below are unchanged.
+//
+//  sha2::sha256d_80(header80, out32, use_midstate)
+//      use_midstate == false : 3 compressions, hashes all 80 bytes every call
+//      use_midstate == true  : 2 compressions, block 0 of the header is
+//                              absorbed once into a thread_local cache that
+//                              rebuilds itself if the header prefix changes
+//  Every thread gets its own cache, and all scratch is on the stack, so this
+//  is safe to call from inside an omp parallel region.
+// ---------------------------------------------------------------------------
+using sha2::sha256;
+using sha2::sha256d_80;
 
 std::string byte_to_hex(const std::string& raw){
     std::stringstream ss;
@@ -394,6 +417,12 @@ MiningResult solve_for_nonce_parallel_stride(BlockHeader bh, int target_zero_bit
 }
 
 int main(int argc, char* argv[]){
+    // Correctness gate: prove the hand-written SHA-256 is right before timing it.
+    if (!sha2::self_test()) {
+        std::cerr << "SHA-256 self-test FAILED (FIPS 180-4 vectors)\n";
+        return 1;
+    }
+
     // Initialize the standard 32-bit Mersenne Twister engine with the seed
     std::mt19937 gen(SEED);
     // Uniform distribution for integers in [1, 100]

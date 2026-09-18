@@ -5,8 +5,8 @@
 #include <ratio>
 #include <sstream>
 #include <vector>
-#include <openssl/evp.h>
 #include <chrono>
+#include "sha256.h"
 
 constexpr int32_t VERSION = 29; 
 constexpr int SEED = 1234; 
@@ -80,27 +80,9 @@ int leading_zero_bits(const std::string& hash /* raw bytes */){
     return count;
 }
 
-std::string sha256(const std::string& input){
-    EVP_MD_CTX* context = EVP_MD_CTX_new();
-    if (!context) return "";
-    
-    const EVP_MD* md = EVP_sha256();
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int length_of_hash = 0;
-    
-    // if failed to initialize
-    if (EVP_DigestInit_ex(context, md, nullptr) != 1 ||
-        EVP_DigestUpdate(context, input.c_str(), input.size()) != 1 ||
-        EVP_DigestFinal_ex(context, hash, &length_of_hash) != 1
-    ){
-        EVP_MD_CTX_free(context);
-        return "";
-    }
-    
-    EVP_MD_CTX_free(context);
-
-    return std::string(reinterpret_cast<char*>(hash), length_of_hash);  // raw 32 byte
-}
+// SHA-256 now comes from core/sha256.h (shared with the OpenMP, MPI and CUDA
+// backends)
+using sha2::sha256;
 
 std::string byte_to_hex(const std::string& raw){
     std::stringstream ss;
@@ -167,6 +149,11 @@ MiningResult solve_for_nonce(BlockHeader bh, int target_zero_bits, uint32_t max_
 }
 
 int main(int argc, char* argv[]){
+    //sha256 implementation by own
+    if (!sha2::self_test()) {
+        std::cerr << "SHA-256 self-test FAILED (FIPS 180-4 vectors)\n";
+        return 1;
+    }
     int target_zero_bits = 24;
 
     if (argc >= 2) {

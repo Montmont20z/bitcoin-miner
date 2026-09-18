@@ -30,13 +30,13 @@ free -h | head -2
 echo "OS:       $(. /etc/os-release; echo "$PRETTY_NAME") / kernel $(uname -r)"
 echo "Compiler: $(g++ --version | head -1)"
 echo "MPI:      $(ompi_info --version 2>/dev/null | head -1 || mpirun --version 2>/dev/null | head -1)"
-echo "OpenSSL:  $(openssl version)"
 command -v nvidia-smi >/dev/null && nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo
 
 echo "Compiling..."
-mpic++ -O3 -std=c++17 "$OLD_SRC" -lcrypto -o miner_old || { echo "OLD build failed"; exit 1; }
-mpic++ -O3 -std=c++17 "$NEW_SRC" -lcrypto -o miner_new || { echo "NEW build failed"; exit 1; }
+CORE="${CORE:-../core}"
+mpic++ -O3 -march=native -I"$CORE" -std=c++17 "$OLD_SRC" "$CORE/sha256.cpp" -o miner_old
+mpic++ -O3 -march=native -I"$CORE" -std=c++17 "$NEW_SRC" "$CORE/sha256.cpp" -o miner_new
 echo "  ok"; echo
 
 echo "experiment,midstate,decomp,np,difficulty,poll,hashes,seconds,rate_hs,nonce,valid,wasted" > "$OUT"
